@@ -1,0 +1,524 @@
+---
+title: "Dataviz (Informe)"
+author: "Mariana Franco & Samuel Bermúdez"
+date: "2025-02-27"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+# *Etapa 1: Carga y Limpieza*
+
+## 1. Cargar librerias.
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(Amelia)
+library(janitor)
+library(magrittr)
+library(ggplot2)
+library(dplyr)
+library(pastecs)
+library(readr)
+library(mice)
+```
+
+## 2. Importar la base de datos y visualizarlos.
+
+```{r}
+datos <- read_csv("C:/Users/franc/Downloads/Dataviz/ifc_investment_services_projects_02-09-2025.csv")
+```
+
+## 3. Resumen de los datos y visualización de Encabezados.
+
+```{r,message=FALSE, warning=FALSE}
+summary(datos)
+dim(datos)
+str(datos)
+```
+
+## 4. Visualización y limpieza de nombres de las variables.
+
+### 4.1. Nombres de las variables originales
+
+```{r}
+names(datos)
+```
+
+### 4.2. Traducción de nombres
+
+```{r}
+datos %<>% clean_names
+nombres <- list(
+  date_disclosed = "fecha_divulgada",
+  project_name = "nombre_proyecto",
+  document_type = "tipo_documento",
+  project_number = "numero_proyecto",
+  project_url = "url_proyecto",
+  product_line = "linea_producto",
+  company_name = "nombre_empresa",
+  country = "pais",
+  ifc_country_code = "codigo_pais_ifc",
+  industry = "industria",
+  environmental_category = "categoria_ambiental",
+  department = "departamento",
+  status = "estado",
+  projected_board_date = "fecha_estimada_junta",
+  ifc_approval_date = "fecha_aprobacion_ifc",
+  ifc_signed_date = "fecha_firma_ifc",
+  ifc_invested_date = "fecha_inversion_ifc",
+  ifc_investment_for_risk_management_million_usd = "inversion_ifc_gestion_riesgo_millones_usd",
+  ifc_investment_for_guarantee_million_usd = "inversion_ifc_garantia_millones_usd",
+  ifc_investment_for_loan_million_usd = "inversion_ifc_prestamo_millones_usd",
+  ifc_investment_for_equity_million_usd = "inversion_ifc_capital_millones_usd",
+  total_ifc_investment_as_approved_by_board_million_usd = "total_inversion_ifc_aprobada_junta_millones_usd",
+  wb_country_code = "codigo_pais_bm",
+  as_of_date = "fecha_corte"
+)
+
+names(datos) <- unname(nombres[names(datos)]) #colocar los nombres en español
+
+```
+
+## 5. Gráfico de datos faltantes.
+
+### 5.1. Datos faltantes originales
+
+```{r,message=FALSE, warning=FALSE}
+missmap(datos, main="Mapa de Datos Faltantes")
+```
+
+### 5.2. Porcentaje de valores NA por variable de mayor a menor
+
+```{r,message=FALSE, warning=FALSE}
+#porcentaje de NAs
+# Calcular el porcentaje de valores NA por columna
+# Ordenar de mayor a menor
+na_percent_sorted <- sort(colSums(is.na(datos)) / nrow(datos) * 100, decreasing = TRUE)
+
+# Mostrar los resultados
+na_percent_sorted
+```
+
+*Se puede observar que existen grandes cantidades de **datos faltantes** y tenemos que proceder a tratarlos, antes de eso haremos una limpieza para poder realizar la limpieza.*
+
+## 6. Revisión y eliminación de duplicados
+
+### 6.1. Revisión de Duplicados
+
+```{r,message=FALSE, warning=FALSE}
+#Revisar duplicados
+datos[duplicated(datos), ]
+sum(duplicated(datos))
+```
+
+*Hay 4 lineas duplicadas.*
+
+### 6.2. Eliminación de duplicados
+
+```{r,message=FALSE, warning=FALSE}
+datos_limpios <- datos %>% distinct()
+sum(duplicated(datos_limpios))
+```
+
+### 6.3. Eliminación de variables NO útiles
+
+```{r,message=FALSE, warning=FALSE}
+datos_limpios <- datos_limpios %>% select(-c(fecha_corte,fecha_estimada_junta,fecha_aprobacion_ifc,fecha_firma_ifc,fecha_inversion_ifc))
+
+```
+
+# *Etapa 2: Manejo de NAs*
+
+*Reemplazamos los NAs por 0 en variables que se encuentran en términos de dinero.*
+
+```{r, message=FALSE, warning=FALSE}
+
+# Reemplazar NAs con 0 en las columnas que contienen "Million"
+datos_limpios <- datos_limpios %>%
+  mutate(across(contains("millones"), ~replace_na(., 0)))
+# Verificar que los NAs han sido reemplazados
+missmap(datos_limpios)
+
+```
+
+*Convertimos el formato de fecha y de los identificadores.*
+
+```{r, message=FALSE, warning=FALSE}
+# Convertir a formato de fecha las columnas relacionadas con fechas
+datos_limpios <- datos_limpios %>%
+  mutate(across(contains("fecha"), as.Date, format = "%m/%d/%Y"))  # Ajustar formato según sea necesario
+
+# Convertir los códigos (Country Code, Project Number, etc.) a factores o caracteres
+datos_limpios <- datos_limpios %>%
+  mutate(across(contains("codigo") | contains("numero"), as.factor))  
+
+# Verificar estructura de la base de datos
+summary(datos_limpios)
+
+# Ordenar de mayor a menor
+ sort(colSums(is.na(datos_limpios)) / nrow(datos) * 100, decreasing = TRUE)
+
+```
+
+*Para las variables que no tienen NAs no se les reliza imputación. Y las variables que son identificadoras no se pueden imputar.*
+
+# Etapa 3: Análisis
+
+## 1. Analisis Univariado
+
+### 1.1. Distribución de la inversión IFC aprobada
+
+Este histograma muestra la distribución de la inversión total aprobada por la junta de la IFC (Corporación Financiera Internacional) en millones de USD. Algunas observaciones clave:
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+library(ggplot2)
+
+# Histograma de la inversión total aprobada
+ggplot(datos_limpios, aes(x = total_inversion_ifc_aprobada_junta_millones_usd)) +
+  geom_histogram(binwidth = 50, fill = "lightblue",color = "darkblue", alpha = 0.7) +
+  labs(title = "Distribución de la Inversión Total Aprobada por la Junta",
+       x = "Inversión IFC aprobada (millones USD)",
+       y = "Frecuencia") +
+  theme_minimal()
+
+```
+
+***Sesgo a la derecha:** La mayoría de las inversiones son pequeñas, concentrándose en valores bajos. A medida que la inversión aumenta, la frecuencia disminuye rápidamente.*
+
+***Valores extremos:** Existen algunos valores significativamente grandes (inversiones superiores a 500 millones USD), pero son poco frecuentes.*
+
+***Distribución altamente asimétrica:** La gran mayoría de los datos están en el rango de 0 a 100 millones USD.*
+
+### 1.2. Proporción de proyectos por categoría ambiental
+
+*Este gráfico de barras muestra la distribución de proyectos por categoría ambiental.*
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+# Gráfico de barras para la categoría ambiental
+ggplot(datos_limpios, aes(x = categoria_ambiental)) +
+  geom_bar(fill = "lightblue") +
+  labs(title = "Distribución de Proyectos por Categoría Ambiental",
+       x = "Categoría Ambiental",
+       y = "Cantidad de Proyectos") +
+  theme_minimal()
+
+```
+
+*La **categoría B** es la más común con aproximadamente 3000 proyectos, lo que indica que la mayoría de los proyectos tienen impactos ambientales moderados.*
+
+*Las categorías **FI** y **FI-2** también tienen una cantidad significativa de proyectos, superando los 1000, lo que sugiere una alta actividad en proyectos financieros con riesgo ambiental.*
+
+*Las categorías **A**, **FI-1** y **"Other"** tienen el menor número de proyectos, lo que podría indicar que los proyectos con alto impacto ambiental (categoría A) son menos frecuentes.*
+
+### 1.3. Cantidad de proyectos por industria
+
+*Este gráfico muestra la distribución de proyectos por industria.*
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+ggplot(datos_limpios, aes(x = industria)) +
+  geom_bar(fill = "lightblue") +
+  labs(title = "Cantidad de proyectos por industria",
+       x = "Industria",
+       y = "Cantidad de proyectos") + theme_minimal()+
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+```
+
+*Las instituciones financieras lideran en cantidad de proyectos, con más de 2,500, lo que sugiere una **fuerte actividad en el sector financiero.** Las industrias de infraestructura y manufactura también tienen un número considerable de proyectos, superando los 1,000, lo que indica que estos sectores son relevantes en términos de inversión y desarrollo. El sector de agronegocios y silvicultura también tiene una participación significativa, aunque menor que las instituciones financieras. **Las industrias con menor cantidad de proyectos incluyen petróleo, gas y minería, telecomunicaciones y tecnología, y turismo, comercio minorista y propiedad.***
+
+### 1.4. Cantidad de proyectos por país
+
+*Este gráfico muestra los 10 países con más proyectos.*
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+# Contar proyectos por país y seleccionar los 10 con más proyectos
+top_paises <- datos_limpios %>%
+  count(pais, sort = TRUE) %>%
+  top_n(10, n)
+
+# Filtrar la base de datos para solo incluir estos países
+datos_top_paises <- datos_limpios %>%
+  filter(pais %in% top_paises$pais)
+
+# Graficar solo los 10 países con más proyectos
+ggplot(datos_top_paises, aes(x = reorder(pais, -table(pais)[pais]))) +
+  geom_bar(fill = "lightblue") +
+  labs(title = "Top 10 países con más proyectos",
+       x = "País",
+       y = "Cantidad de proyectos") + theme_minimal()+
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+```
+
+***India** lidera la lista con más de 500 proyectos, lo que indica una alta actividad en inversión o desarrollo en el país. **Brasil y China** le siguen con alrededor de 300 proyectos cada uno. Turquía y la categoría "World Region" tienen un número similar de proyectos, algo menor que China. **Colombia** aparece en la lista, aunque con un número de proyectos menor en comparación con países como India y Brasil. **Egipto** cierra el ranking con la menor cantidad dentro del top 10.*
+
+### 1.5. Estado de los proyectos
+
+*Este gráfico muestra la distribución del estado de los proyectos.*
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+ggplot(datos_limpios, aes(x = estado)) +
+  geom_bar(fill = "lightblue") +
+  labs(title = "Distribución del estado de los proyectos",
+       x = "Estado",
+       y = "Cantidad de proyectos") + theme_minimal()+
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+```
+
+*La mayoría de los proyectos están completados (\~4000), lo que indica un alto nivel de finalización. Los proyectos activos también son significativos (\~2000), mostrando que todavía hay una cantidad considerable en ejecución. Los estados "Hold", "Pending Approval", "Pending Disbursement" y "Pending Signing" tienen muy pocos proyectos, lo que sugiere que la mayoría de los proyectos avanzan sin grandes bloqueos.*
+
+## 2. Analisis Bivariado
+
+### 2.1. Industria vs. Inversión Total IFC
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+# Boxplot de inversión por industria
+ggplot(datos_limpios, aes(x = industria, y = total_inversion_ifc_aprobada_junta_millones_usd)) +
+  geom_boxplot(fill = "lightblue", color = "black", outlier.color = "blue", outlier.shape = 16) +
+  labs(title = "Distribución de Inversión IFC por Industria",
+       x = "Industria",
+       y = "Inversión IFC aprobada (millones USD)") + theme_minimal()+
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+```
+
+*El gráfico muestra la distribución de la inversión aprobada por la IFC en distintas industrias. Se observa que la mayoría de las inversiones están en rangos bajos, pero hay valores atípicos significativos, especialmente en **Financial Institutions, Infrastructure y Manufacturing**, donde algunas inversiones superan los 1000 millones de USD. La mediana de inversión es baja en casi todas las industrias, indicando que solo unos pocos proyectos reciben montos muy altos.*
+
+### 2.2. País vs. Inversión Total IFC
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+# Selección de los 10 países con mayor inversión
+top_paises <- datos_limpios %>%
+  group_by(pais) %>%
+  summarise(total_inversion = sum(total_inversion_ifc_aprobada_junta_millones_usd, na.rm = TRUE)) %>%
+  arrange(desc(total_inversion)) %>%
+  top_n(10, total_inversion)
+
+# Gráfico de barras para los 10 países con mayor inversión
+ggplot(top_paises, aes(x = reorder(pais, -total_inversion), y = total_inversion)) +
+  geom_bar(stat = "identity", fill = "lightblue", alpha = 0.7) +
+  labs(title = "Top 10 Países con Mayor Inversión IFC Aprobada",
+       x = "Pais",
+       y = "Inversión IFC aprobada (millones USD)") + theme_minimal()+
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+top_paises
+
+```
+
+*El gráfico muestra los 10 países con mayor inversión aprobada por la IFC, destacando que la World Region recibe la mayor cantidad de fondos, seguida por India y Brasil. Otros países como Turquía, China y Sudáfrica también presentan inversiones significativas. Colombia se encuentra en los últimos lugares del top 10, con una inversión similar a la de México y Nigeria. Esto sugiere que la IFC concentra sus recursos en regiones estratégicas con economías emergentes y de alto impacto.*
+
+### 2.3. Cantidad de proyectos divulgados por año
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+library(lubridate)
+
+# Convertimos la fecha de divulgación a tipo Date si no lo está
+datos_limpios$fecha_divulgada <- as.Date(datos_limpios$fecha_divulgada)
+
+# Extraemos el año de cada fecha
+datos_limpios$anio_divulgacion <- year(datos_limpios$fecha_divulgada)
+
+# Contamos la cantidad de proyectos divulgados por año
+proyectos_por_anio <- datos_limpios %>%
+  group_by(anio_divulgacion) %>%
+  summarise(cantidad_proyectos = n()) %>%
+  arrange(anio_divulgacion)
+
+# Gráfico de líneas
+ggplot(proyectos_por_anio, aes(x = anio_divulgacion, y = cantidad_proyectos)) +
+  geom_line(color = "lightblue", size = 1) +
+  geom_point(color = "black", size = 2) +
+  labs(title = "Evolución de la cantidad de proyectos divulgados por año",
+       x = "Año",
+       y = "Cantidad de proyectos") +
+  theme_minimal()
+
+```
+
+*El gráfico muestra la evolución del número de proyectos divulgados por año, reflejando una tendencia general de crecimiento con fluctuaciones. Se observa un rápido aumento a finales de los años 90, seguido de variaciones entre 2000 y 2020. En los últimos años, hubo un fuerte incremento, alcanzando un pico reciente, pero con una caída abrupta en el último dato disponible. Esto podría indicar un cambio en las políticas de divulgación o una variación excepcional en la cantidad de proyectos aprobados.*
+
+### 2.4. Los 10 años con más proyectos aprobados
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+# Contamos la cantidad de proyectos por año
+top_anios <- datos_limpios %>%
+  group_by(anio_divulgacion) %>%
+  summarise(cantidad_proyectos = n()) %>%
+  arrange(desc(cantidad_proyectos)) %>%
+  head(10)  # Tomamos los 10 años con más proyectos
+
+# Gráfico de barras
+ggplot(top_anios, aes(x = reorder(anio_divulgacion, cantidad_proyectos), y = cantidad_proyectos)) +
+  geom_bar(stat = "identity", fill = "lightblue", alpha = 0.7) +
+  labs(title = "Top 10 Años con Más Proyectos Aprobados",
+       x = "Año",
+       y = "Cantidad de Proyectos") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) + # Ajustamos el ángulo del texto
+  coord_flip()  # Rotamos el gráfico para mejor visualización
+
+```
+
+*El gráfico muestra los 10 años con más proyectos aprobados, destacando que 2024 y 2023 fueron los años con la mayor cantidad. Esto sugiere un aumento significativo en la aprobación de proyectos en los últimos años, posiblemente debido a cambios en políticas de financiamiento, aumento en la cantidad de propuestas o mejoras en los procesos de evaluación. También se observan otros picos en años como 2010, 2007 y 2014, lo que podría indicar períodos de mayor inversión o iniciativas estratégicas en esos momentos.*
+
+### 2.5. Mapa de inversión IFC aprobada por país
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+
+# Instalar paquetes si es necesario
+if (!require("rworldmap")) install.packages("rworldmap", dependencies=TRUE)
+if (!require("ggplot2")) install.packages("ggplot2", dependencies=TRUE)
+
+library(RColorBrewer)
+library(ggplot2)
+library(dplyr)
+library(rworldmap)
+
+# Agrupar inversión total por país
+map_data <- datos_limpios %>%
+  group_by(pais) %>%
+  summarise(total_inversion = sum(total_inversion_ifc_aprobada_junta_millones_usd, na.rm = TRUE))
+
+# Unir datos con el mapa mundial de rworldmap
+mapa_mundial <- joinCountryData2Map(map_data, joinCode = "NAME", nameJoinColumn = "pais")
+
+# Gráfico del mapa mundial
+mapCountryData(mapa_mundial, 
+               nameColumnToPlot = "total_inversion", 
+               mapTitle = "Inversión IFC Aprobada por Pais",
+               catMethod = "logFixedWidth", # Usa escala logarítmica
+               colourPalette = brewer.pal(7, "Blues"),
+               addLegend = TRUE)
+
+```
+
+*Se observa que países de América Latina, África y Asia Central tienen inversión aprobada en distintos niveles.*
+
+*Rusia y algunos países de Asia, así como partes de África, presentan colores más oscuros, indicando mayor inversión.*
+
+*En América Latina, Brasil y otros países tienen una inversión relativamente alta.*
+
+## 3. Análisis Multivariado
+
+### 3.1. Relación entre Inversión, Categoría Ambiental y Región
+
+*Este análisis examina cómo varía la inversión aprobada según la categoría ambiental y la región del proyecto.*
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+# Cálculo de estadísticas descriptivas
+library(dplyr)
+inversion_por_categoria_region <- datos_limpios %>%
+  group_by(categoria_ambiental, pais) %>%
+  summarise(
+    inversion_media = mean(total_inversion_ifc_aprobada_junta_millones_usd, na.rm = TRUE),
+    inversion_mediana = median(total_inversion_ifc_aprobada_junta_millones_usd, na.rm = TRUE),
+    inversion_maxima = max(total_inversion_ifc_aprobada_junta_millones_usd, na.rm = TRUE),
+    inversion_minima = min(total_inversion_ifc_aprobada_junta_millones_usd, na.rm = TRUE)
+  )
+
+print(inversion_por_categoria_region)
+```
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+# Gráfico de barras apiladas para inversión por categoría ambiental y región
+top_regiones <- datos_limpios %>%
+  count(pais, sort = TRUE) %>%
+  top_n(10) %>%
+  pull(pais)
+
+datos_limpios <- datos_limpios %>%
+  mutate(region_simplificada = ifelse(pais %in% top_regiones, pais, "Otras"))
+
+```
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+datos_filtrados <- datos_limpios %>%
+  filter(region_simplificada != "World Region") %>%
+  mutate(pais = case_when(
+    pais == "Egypt, Arab Republican of" ~ "Egypt",
+    pais == "Russian Federation" ~ "Russia",
+    TRUE ~ pais  # Mantiene los demás países sin cambios
+  ))
+
+view(datos_filtrados)
+
+# Gráfico actualizado
+ggplot(datos_filtrados, aes(x = categoria_ambiental, 
+                            y = total_inversion_ifc_aprobada_junta_millones_usd, 
+                            fill = categoria_ambiental)) +
+  geom_bar(stat = "identity", position = "dodge", alpha = 0.8) +
+  scale_fill_brewer(palette = "Pastel1") +  # Colores suaves
+  labs(title = "Distribución de la Inversión por Categoría Ambiental y Región",
+       x = "Categoría Ambiental",
+       y = "Inversión Total Aprobada (millones USD)",
+       fill = "Categoría Ambiental") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  facet_wrap(~ region_simplificada, scales = "free_y")  # Un gráfico por región
+
+```
+
+*El gráfico muestra la distribución de la inversión total aprobada en millones de USD por categoría ambiental y región. Se destacan algunas diferencias clave entre regiones, con México y "Otras regiones" mostrando los valores de inversión más altos, particularmente en la categoría B. En países como India y China, las inversiones están más distribuidas, con la categoría FI-2 destacando. Otros países, como Rusia y Turquía, presentan inversiones más concentradas en pocas categorías. Esto sugiere que la asignación de inversión varía según las estrategias ambientales y prioridades de cada región, posiblemente debido a políticas locales, necesidades específicas de desarrollo o acceso a financiamiento diferenciado.*
+
+### 3.2. Relación entre Industria, Región y Monto de Inversión
+
+*Se analiza cómo se distribuye la inversión entre distintas industrias y regiones.*
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+# Cálculo de inversión total por industria y región
+datos_inversion_region <- datos_limpios %>%
+  group_by(industria, pais) %>%
+  summarise(inversion_total = sum(total_inversion_ifc_aprobada_junta_millones_usd, na.rm = TRUE)) %>%
+  ungroup()
+
+print(head(datos_inversion_region))
+```
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+library(scales) # Para mejorar el formato de números
+
+# Seleccionar las 10 regiones más frecuentes y agrupar el resto como "Otras"
+top_regiones <- datos_limpios %>%
+  count(pais, sort = TRUE) %>%
+  top_n(10) %>%
+  pull(pais)
+
+datos_limpios <- datos_limpios %>%
+  mutate(region_simplificada = ifelse(pais %in% top_regiones, pais, "Otras"))
+
+# Crear una paleta de colores pastel automática
+ggplot(datos_filtrados, aes(x = categoria_ambiental, 
+                            y = total_inversion_ifc_aprobada_junta_millones_usd, 
+                            fill = categoria_ambiental)) +
+  geom_bar(stat = "identity", position = "dodge", alpha = 0.8) +
+  scale_fill_brewer(palette = "Pastel1") +  # Colores suaves para diferenciar categorías
+  labs(title = "Distribución de la Inversión por Categoría Ambiental e Industria",
+       x = "Categoría Ambiental",
+       y = "Inversión Total Aprobada (millones USD)",
+       fill = "Categoría Ambiental") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  facet_wrap(~ industria, scales = "free_y")  # Un gráfico por industria
+
+```
+
+*El gráfico muestra la distribución de la inversión total aprobada en millones de USD por categoría ambiental e industria. Se observa que el sector Manufacturing y Business and Forestry reciben las mayores inversiones, especialmente en la categoría FI-2. En contraste, sectores como Health and Education y Funds tienen una distribución más equilibrada, con una fuerte presencia de la categoría B. Oil, Gas, and Mining muestra una inversión significativa en la categoría A, lo que podría estar relacionado con regulaciones ambientales más estrictas. Esto sugiere que la asignación de inversión varía según la naturaleza de la industria, posiblemente debido a factores como el impacto ambiental, regulaciones específicas y acceso a financiamiento especializado.*
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+ggplot(datos_filtrados, aes(x = industria, 
+                            y = total_inversion_ifc_aprobada_junta_millones_usd, 
+                            fill = region_simplificada)) +
+  geom_bar(stat = "identity", position = "stack", alpha = 0.8) +
+  scale_fill_brewer(palette = "Set3") +  # Colores suaves y diferenciados
+  labs(title = "Distribución de la Inversión por Industria y Región",
+       x = "Industria",
+       y = "Inversión Total Aprobada (millones USD)",
+       fill = "Región") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+*El gráfico muestra la distribución de la inversión total aprobada en millones de USD por industria y región. Se observa que el sector Financial Institutions recibe la mayor inversión, destacando significativamente sobre las demás industrias. También se identifican picos importantes en Infrastructure y Manufacturing, lo que sugiere un enfoque en el desarrollo de estos sectores. La inversión está distribuida en múltiples regiones, con Otras regiones siendo la categoría predominante en la mayoría de las industrias. Esto podría indicar una estrategia global de financiamiento diversificado, con un énfasis en sectores clave para el crecimiento económico y el desarrollo estructural.*
